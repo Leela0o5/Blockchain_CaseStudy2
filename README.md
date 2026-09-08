@@ -27,3 +27,20 @@ The prototype is intended to demonstrate a trust-minimized workflow for exchangi
 - Automatically release payment to workers after successful verification
 - Provide a decentralized mechanism for exchanging computing resources
 - Demonstrate the complete workflow on the Ethereum Sepolia Testnet
+
+## Technology Stack
+
+### Smart Contract Tech Stack
+
+- **Blockchain:** Ethereum
+- **Network:** Ethereum Sepolia Testnet
+- **Smart Contract Language:** Solidity
+- **Development Framework:** Hardhat
+- **Contract Testing:** Hardhat + TypeScript
+- **Contract Deployment:** Hardhat deployment scripts
+- **Wallet / Transactions:** MetaMask
+- **Proof Verification:** RISC Zero Ethereum verifier/verification mechanism
+- **Code Formatting:** Prettier
+- **Solidity Linting:** Solhint
+- **TypeScript/JavaScript Linting:** ESLint
+- **Version Control:** Git + GitHub
