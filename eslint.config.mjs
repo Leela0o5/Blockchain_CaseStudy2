@@ -1,18 +1,18 @@
-import tsParser from "@typescript-eslint/parser";
+import tsParser from '@typescript-eslint/parser';
 
 export default [
   {
-    ignores: ["artifacts/**", "cache/**", "node_modules/**", "coverage/**"],
+    ignores: ['artifacts/**', 'cache/**', 'node_modules/**', 'coverage/**'],
   },
   {
-    files: ["**/*.js", "**/*.mjs", "**/*.ts"],
+    files: ['**/*.js', '**/*.mjs', '**/*.ts'],
     languageOptions: {
       ecmaVersion: 2022,
-      sourceType: "module",
+      sourceType: 'module',
       parser: tsParser,
     },
     rules: {
-      "no-unused-vars": "warn",
+      'no-unused-vars': 'warn',
     },
   },
 ];
