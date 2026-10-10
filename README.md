@@ -62,22 +62,22 @@ npx hardhat run scripts/deploy-risc0-verifier.ts --network localhost
 
 The script deploys the official contract with the `CONTROL_ROOT` and
 `BN254_CONTROL_ID` values from the pinned release's `ControlID.sol`. It is
-restricted to the ephemeral `hardhat` network or the configured local
-`localhost` node and prints the deployed address, upstream semantic version,
-and verifier selector. To deploy only to an ephemeral in-memory Hardhat
-network, omit `--network localhost`.
+restricted to local networks, except Sepolia deployment which requires the
+explicit `DEPLOY_RISC0_VERIFIER=true` opt-in described in Stage 4. It prints
+the deployed address, upstream semantic version, and verifier selector. To
+deploy only to an ephemeral in-memory Hardhat network, omit
+`--network localhost`.
 
 The Stage 1 test deploys the official contract and checks that it has code,
 exposes `verify(bytes,bytes32,bytes32)`, and reports the expected version,
 selector, and BN254 control ID. **This interface/deployment smoke test does not
-verify a RISC Zero receipt or Groth16 proof.** The marketplace still uses its
-existing mock verifier and has not been wired to the official verifier in this
-stage.
+verify a RISC Zero receipt or Groth16 proof.** Marketplace mock tests cover
+logic only; Stage 4 describes the official verifier call path.
 
 ## Real RISC Zero receipt verification (Stage 2)
 
-The real-proof check is separate from the marketplace and its mock-verifier
-tests. It generates a fresh Groth16 receipt from the existing matrix guest,
+The real-proof check is separate from marketplace logic tests. It generates a
+fresh Groth16 receipt from the existing matrix guest,
 locally verifies the receipt, rejects non-Groth16 (including dev-mode fake)
 receipts, and uses the pinned official `risc0-ethereum-contracts` 1.2.1
 `encode_seal(&receipt)` helper. That upstream helper prefixes the proof seal
@@ -101,7 +101,9 @@ This command starts an ephemeral local Hardhat network, generates the actual
 Groth16 proof through
 `cargo run --locked -p host --bin export-ethereum-proof`, deploys
 `RiscZeroGroth16Verifier` with the pinned control IDs, and invokes
-`verify(bytes,bytes32,bytes32)`. For a persistent local node, start
+`verify(bytes,bytes32,bytes32)`. It also submits the same genuine receipt
+through `ComputeMarketplace` and checks the completed job and escrow release.
+For a persistent local node, start
 `npx hardhat node` in another terminal and run:
 
 ```sh
@@ -118,19 +120,19 @@ smoke test do not establish this result.
 ## Matrix proof input and journal binding (Stage 3)
 
 The matrix guest receives a byte-framed request and independently recomputes
-the input commitment before it performs the multiplication. `ComputeMarketplace`
-is unchanged: its existing `inputData` field can contain the canonical matrix
-input payload, but the contract does not parse or enforce that payload.
+the input commitment before it performs the multiplication. Stage 4 validates
+the canonical input bytes on job creation and binds the journal commitment to
+the exact stored `inputData`.
 
 Canonical matrix input bytes are:
 
-| Field | Encoding |
-| --- | --- |
-| Version tag | ASCII `RZMM_INPUT_V1` (13 bytes) |
-| A rows, A columns | `u32` big-endian |
-| A elements | Row-major signed `i32`, two's-complement big-endian |
-| B rows, B columns | `u32` big-endian |
-| B elements | Row-major signed `i32`, two's-complement big-endian |
+| Field             | Encoding                                            |
+| ----------------- | --------------------------------------------------- |
+| Version tag       | ASCII `RZMM_INPUT_V1` (13 bytes)                    |
+| A rows, A columns | `u32` big-endian                                    |
+| A elements        | Row-major signed `i32`, two's-complement big-endian |
+| B rows, B columns | `u32` big-endian                                    |
+| B elements        | Row-major signed `i32`, two's-complement big-endian |
 
 All dimensions must be nonzero, element counts must match dimensions, and
 A's column count must equal B's row count. The input commitment is
@@ -140,25 +142,72 @@ The guest transport prepends a 32-byte big-endian `uint256` job ID, the
 32-byte input commitment, and the canonical input byte length as `u32`
 big-endian. The journal is raw, non-serde data:
 
-| Field | Encoding |
-| --- | --- |
-| Version tag | ASCII `RZMM_JOURNAL_V1` (15 bytes) |
-| Job ID | 32-byte big-endian `uint256` |
-| Input commitment | 32 bytes |
-| Result rows, result columns | `u32` big-endian |
-| Result elements | Row-major signed `i32`, two's-complement big-endian |
+| Field                       | Encoding                                            |
+| --------------------------- | --------------------------------------------------- |
+| Version tag                 | ASCII `RZMM_JOURNAL_V1` (15 bytes)                  |
+| Job ID                      | 32-byte big-endian `uint256`                        |
+| Input commitment            | 32 bytes                                            |
+| Result rows, result columns | `u32` big-endian                                    |
+| Result elements             | Row-major signed `i32`, two's-complement big-endian |
 
 The Ethereum journal digest remains SHA-256 of the exact raw journal bytes.
 The proof exporter validates the bound journal and the local EVM script checks
 the canonical input, input commitment, journal fields, journal SHA-256, and
-then submits the genuine selector-prefixed Groth16 seal to the official
-verifier. Run the updated integration with:
-
-```sh
-npm run verify:risc0
-```
+then submits the genuine selector-prefixed Groth16 seal through the official
+verifier and marketplace. See the Stage 4 instructions below.
 
 The job ID in this proof demonstration is the fixed value `7`; production job
-creation and marketplace submission are not wired to the proof exporter in
-this stage. The existing expensive Rust Groth16 test remains separate from the
-fast unit tests in `risc0/matrix-format` and `risc0/host`.
+creation is not wired to the proof exporter beyond this local integration
+demonstration. The existing expensive Rust Groth16 test remains separate from
+the fast unit tests in `risc0/matrix-format` and `risc0/host`.
+
+## Marketplace verification and escrow release (Stage 4)
+
+The marketplace uses the official no-return ABI
+`verify(bytes seal, bytes32 imageId, bytes32 journalDigest)`. It passes the
+selector-prefixed proof, the image ID stored on the job, and SHA-256 of the
+exact raw journal bytes. The official verifier reverts on failure. Before
+calling it, the marketplace checks the Stage 3 journal tag, big-endian job ID,
+input commitment (`sha256` of the exact stored canonical input bytes),
+nonzero result dimensions, result dimensions matching the input matrices, and
+the exact journal size `87 + rows * columns * 4`. The raw journal remains in
+the existing `Job.result` field. Invalid journals or failed verifier calls
+revert before completion state or worker payment can persist.
+
+The repository has no approved-image allowlist. A job creator can choose any
+nonzero image ID; the marketplace consistently verifies against the ID stored
+in that job, but does not establish that the ID belongs to an approved matrix
+guest. Do not treat arbitrary job image IDs as trusted; production needs an
+explicit image approval policy.
+
+`npm test` uses `MockRiscZeroVerifier` for fast **marketplace logic tests only**;
+the mock reverts or checks call arguments but does not verify cryptographic
+proofs. `npm run verify:risc0` generates one genuine Groth16 receipt, verifies
+it directly with the pinned official verifier, then submits it through the
+marketplace and checks the completed job and released escrow.
+
+For a persistent local Hardhat node, deploy the official verifier first and
+explicitly pass its address into marketplace deployment:
+
+```sh
+npx hardhat node
+npx hardhat run scripts/deploy-risc0-verifier.ts --network localhost
+VERIFIER_ADDRESS=0x... npx hardhat run scripts/deploy.ts --network localhost
+```
+
+The local mock deployment must be explicitly requested and is development-only:
+
+```sh
+DEPLOY_MOCK_VERIFIER=true npx hardhat run scripts/deploy.ts --network localhost
+```
+
+`deploy.ts` otherwise requires a nonzero `VERIFIER_ADDRESS` with deployed
+contract code and rejects mock mode on public networks. For Sepolia, configure
+`SEPOLIA_RPC_URL` and `PRIVATE_KEY` in the environment, then explicitly opt in
+to deploying the official verifier. Use its printed address for the marketplace
+deployment:
+
+```sh
+DEPLOY_RISC0_VERIFIER=true npx hardhat run scripts/deploy-risc0-verifier.ts --network sepolia
+VERIFIER_ADDRESS=0x... npx hardhat run scripts/deploy.ts --network sepolia
+```

@@ -12,7 +12,10 @@ describe('RiscZeroGroth16Verifier (official v1.2.1 source)', () => {
     await verifier.waitForDeployment();
 
     expect(await ethers.provider.getCode(await verifier.getAddress())).not.to.equal('0x');
-    expect(verifier.interface.getFunction('verify(bytes,bytes32,bytes32)')).not.to.equal(null);
+    const verify = verifier.interface.getFunction('verify(bytes,bytes32,bytes32)');
+    expect(verify).not.to.equal(null);
+    expect(verify?.outputs.length).to.equal(0);
+    expect(verify?.stateMutability).to.equal('view');
     expect(await verifier.VERSION()).to.equal('1.2.0');
     expect(await verifier.SELECTOR()).to.equal('0xc101b42b');
     expect(await verifier.BN254_CONTROL_ID()).to.equal(RISC_ZERO_BN254_CONTROL_ID);

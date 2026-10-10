@@ -2,8 +2,14 @@ import { ethers, network } from 'hardhat';
 import { RISC_ZERO_BN254_CONTROL_ID, RISC_ZERO_CONTROL_ROOT } from './risc0-verifier-config';
 
 async function main() {
-  if (network.name !== 'hardhat' && network.name !== 'localhost') {
-    throw new Error(`Refusing to deploy the local RISC Zero verifier to ${network.name}.`);
+  if (
+    network.name !== 'hardhat' &&
+    network.name !== 'localhost' &&
+    (network.name !== 'sepolia' || process.env.DEPLOY_RISC0_VERIFIER !== 'true')
+  ) {
+    throw new Error(
+      `Verifier deployment is allowed only on local networks, or on Sepolia when DEPLOY_RISC0_VERIFIER=true (current: ${network.name}).`,
+    );
   }
 
   const [deployer] = await ethers.getSigners();

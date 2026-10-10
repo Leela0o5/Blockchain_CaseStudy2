@@ -3,43 +3,51 @@ pragma solidity ^0.8.28;
 
 import {IRiscZeroVerifier} from "../interfaces/IRiscZeroVerifier.sol";
 
-/// @title MockRiscZeroVerifier
-/// @notice Test verifier to simulate valid and invalid RISC Zero proofs in development
+/// @notice Test stub for marketplace logic tests; it does not verify proofs cryptographically.
 contract MockRiscZeroVerifier is IRiscZeroVerifier {
     bool private _forceFail;
+    bool private _checkExpectedCall;
+    bytes32 private _expectedImageId;
+    bytes32 private _expectedJournalDigest;
+    bytes32 private _expectedSealHash;
 
     event ForceFailConfigured(bool forceFail);
+    event ExpectedCallConfigured(bytes32 imageId, bytes32 journalDigest, bytes32 sealHash);
 
-    /// @notice Sets whether future verification calls should fail
-    /// @param forceFail True to reject all proofs, false to verify normally
+    error MockVerificationFailed();
+
     function setForceFail(bool forceFail) external {
         _forceFail = forceFail;
         emit ForceFailConfigured(forceFail);
     }
 
-    /// @notice Returns current forceFail status
     function isForceFail() external view returns (bool) {
         return _forceFail;
     }
 
-    /// @notice Verifies proof based on mock logic (accepts unless forceFail or empty seal/imageId)
-    /// @param imageId The RISC Zero guest program image ID
-    /// @param seal The cryptographic proof bytes
-    /// @return valid True if verification succeeds
+    function setExpectedCall(bytes32 imageId, bytes32 journalDigest, bytes32 sealHash) external {
+        _checkExpectedCall = true;
+        _expectedImageId = imageId;
+        _expectedJournalDigest = journalDigest;
+        _expectedSealHash = sealHash;
+        emit ExpectedCallConfigured(imageId, journalDigest, sealHash);
+    }
+
     function verify(
+        bytes calldata seal,
         bytes32 imageId,
-        bytes calldata /* journal */,
-        bytes calldata seal
-    ) external view override returns (bool valid) {
-        if (_forceFail) {
-            return false;
+        bytes32 journalDigest
+    ) external view override {
+        if (_forceFail || imageId == bytes32(0) || seal.length == 0) {
+            revert MockVerificationFailed();
         }
-        if (imageId == bytes32(0)) {
-            return false;
+        if (
+            _checkExpectedCall &&
+            (imageId != _expectedImageId ||
+                journalDigest != _expectedJournalDigest ||
+                keccak256(seal) != _expectedSealHash)
+        ) {
+            revert MockVerificationFailed();
         }
-        if (seal.length == 0) {
-            return false;
-        }
-        return true;
     }
 }
