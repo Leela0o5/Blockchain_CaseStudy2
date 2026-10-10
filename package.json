@@ -6,6 +6,7 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
+    "verify:risc0:real": "hardhat run scripts/verify-real-risc0-receipt.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -24,6 +25,7 @@
     "eslint": "^9.17.0",
     "ethers": "^6.13.5",
     "hardhat": "^2.22.18",
+    "openzeppelin": "https://github.com/OpenZeppelin/openzeppelin-contracts/archive/01ef448981be9d20ca85f2faf6ebdf591ce409f3.tar.gz",
     "prettier": "^3.4.2",
     "prettier-plugin-solidity": "^1.4.2",
     "solhint": "^5.0.5",
