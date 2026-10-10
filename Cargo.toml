@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "risc0/matrix-format",
     "risc0/host",
     "risc0/methods",
 ]

@@ -1,8 +1,13 @@
 //! Modular host execution, receipt verification, and result extraction logic.
 
+use matrix_format::{
+    decode_journal, encode_guest_input, encode_matrix_inputs, validate_binding, FormatError,
+    Matrix as WireMatrix,
+};
 use methods::{MATRIX_MULTIPLY_GUEST_ELF, MATRIX_MULTIPLY_GUEST_ID};
 use risc0_zkvm::{default_prover, ExecutorEnv, ProverOpts, Receipt};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,6 +26,9 @@ pub enum HostError {
 
     #[error("Receipt result does not match the expected result")]
     ResultMismatch,
+
+    #[error("Invalid proof journal: {0}")]
+    InvalidJournal(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,10 +45,13 @@ impl Matrix {
                 "Matrix dimensions must be non-zero".to_string(),
             ));
         }
-        if data.len() != rows * cols {
+        let expected_len = rows
+            .checked_mul(cols)
+            .ok_or_else(|| HostError::InvalidInput("Matrix dimensions overflow".to_string()))?;
+        if data.len() != expected_len {
             return Err(HostError::InvalidInput(format!(
                 "Data length mismatch: expected {}, got {}",
-                rows * cols,
+                expected_len,
                 data.len()
             )));
         }
@@ -82,18 +93,56 @@ impl Matrix {
 
 /// Constructs execution environment and generates RISC Zero receipt.
 pub fn execute_and_prove(matrix_a: &Matrix, matrix_b: &Matrix) -> Result<Receipt, HostError> {
+    execute_and_prove_for_job(matrix_a, matrix_b, [0u8; 32])
+}
+
+/// Generates a proof whose journal binds the given job ID and input commitment.
+pub fn execute_and_prove_for_job(
+    matrix_a: &Matrix,
+    matrix_b: &Matrix,
+    job_id: [u8; 32],
+) -> Result<Receipt, HostError> {
+    let canonical_inputs = canonical_input_bytes(matrix_a, matrix_b)?;
+    let input_commitment: [u8; 32] = Sha256::digest(&canonical_inputs).into();
+    let guest_input =
+        encode_guest_input(job_id, input_commitment, &canonical_inputs).map_err(format_error)?;
     let env = ExecutorEnv::builder()
-        .write(&(matrix_a, matrix_b))
-        .map_err(|e| HostError::ProverError(format!("Failed to build env input: {e}")))?
+        .write_slice(&guest_input)
         .build()
         .map_err(|e| HostError::ProverError(format!("Failed to build env: {e}")))?;
 
     let prover = default_prover();
     let prove_info = prover
-	 .prove_with_opts(env, MATRIX_MULTIPLY_GUEST_ELF, &ProverOpts::groth16())
-   	 .map_err(|e| HostError::ProverError(format!("Prover failed: {e}")))?;
+        .prove_with_opts(env, MATRIX_MULTIPLY_GUEST_ELF, &ProverOpts::groth16())
+        .map_err(|e| HostError::ProverError(format!("Prover failed: {e}")))?;
 
     Ok(prove_info.receipt)
+}
+
+/// Encodes the matrix inputs in the canonical format and returns its SHA-256 commitment.
+pub fn input_commitment(matrix_a: &Matrix, matrix_b: &Matrix) -> Result<[u8; 32], HostError> {
+    let canonical_inputs = canonical_input_bytes(matrix_a, matrix_b)?;
+    Ok(Sha256::digest(&canonical_inputs).into())
+}
+
+/// Encodes matrices using the fixed-width canonical format committed by the guest.
+pub fn canonical_input_bytes(matrix_a: &Matrix, matrix_b: &Matrix) -> Result<Vec<u8>, HostError> {
+    let to_wire = |matrix: &Matrix| -> Result<WireMatrix, HostError> {
+        let rows = u32::try_from(matrix.rows)
+            .map_err(|_| HostError::InvalidInput("Matrix rows exceed u32".to_string()))?;
+        let cols = u32::try_from(matrix.cols)
+            .map_err(|_| HostError::InvalidInput("Matrix columns exceed u32".to_string()))?;
+        Ok(WireMatrix {
+            rows,
+            cols,
+            data: matrix.data.clone(),
+        })
+    };
+    encode_matrix_inputs(&to_wire(matrix_a)?, &to_wire(matrix_b)?).map_err(format_error)
+}
+
+fn format_error(error: FormatError) -> HostError {
+    HostError::InvalidInput(error.to_string())
 }
 
 /// Verifies the receipt cryptographically against the guest Image ID.
@@ -105,10 +154,31 @@ pub fn verify_receipt(receipt: &Receipt) -> Result<(), HostError> {
 
 /// Decodes the committed matrix result from the receipt journal.
 pub fn extract_result(receipt: &Receipt) -> Result<Matrix, HostError> {
-    receipt
-        .journal
-        .decode::<Matrix>()
-        .map_err(|e| HostError::JournalDecodeError(format!("Failed to decode journal: {e}")))
+    let journal = decode_journal(&receipt.journal.bytes)
+        .map_err(|e| HostError::JournalDecodeError(e.to_string()))?;
+    Ok(Matrix {
+        rows: journal.result.rows as usize,
+        cols: journal.result.cols as usize,
+        data: journal.result.data,
+    })
+}
+
+/// Verifies receipt validity and that its journal binds the expected job and input.
+pub fn verify_and_extract_bound(
+    receipt: &Receipt,
+    expected_job_id: [u8; 32],
+    expected_input_commitment: [u8; 32],
+) -> Result<Matrix, HostError> {
+    verify_receipt(receipt)?;
+    let journal = decode_journal(&receipt.journal.bytes)
+        .map_err(|e| HostError::JournalDecodeError(e.to_string()))?;
+    validate_binding(&journal, expected_job_id, expected_input_commitment)
+        .map_err(|e| HostError::InvalidJournal(e.to_string()))?;
+    Ok(Matrix {
+        rows: journal.result.rows as usize,
+        cols: journal.result.cols as usize,
+        data: journal.result.data,
+    })
 }
 
 /// Verifies receipt and extracts the computational result.

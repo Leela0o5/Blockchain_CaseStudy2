@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 methods = { path = "../methods" }
+matrix-format = { path = "../matrix-format" }
 risc0-zkvm = { version = "1.2.0", default-features = false, features = ["std", "prove"] }
 risc0-ethereum-contracts = "=1.2.1"
 hex = "0.4"

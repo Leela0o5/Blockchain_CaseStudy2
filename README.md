@@ -114,3 +114,51 @@ confirmation of real on-chain verification and rejection of the altered
 digest. Do not set `RISC0_DEV_MODE=1` for this check. The Rust exporter requires
 a genuine `Groth16` receipt; the existing mock verifier and Stage 1 interface
 smoke test do not establish this result.
+
+## Matrix proof input and journal binding (Stage 3)
+
+The matrix guest receives a byte-framed request and independently recomputes
+the input commitment before it performs the multiplication. `ComputeMarketplace`
+is unchanged: its existing `inputData` field can contain the canonical matrix
+input payload, but the contract does not parse or enforce that payload.
+
+Canonical matrix input bytes are:
+
+| Field | Encoding |
+| --- | --- |
+| Version tag | ASCII `RZMM_INPUT_V1` (13 bytes) |
+| A rows, A columns | `u32` big-endian |
+| A elements | Row-major signed `i32`, two's-complement big-endian |
+| B rows, B columns | `u32` big-endian |
+| B elements | Row-major signed `i32`, two's-complement big-endian |
+
+All dimensions must be nonzero, element counts must match dimensions, and
+A's column count must equal B's row count. The input commitment is
+`SHA-256(canonical matrix input bytes)`; it excludes the job ID.
+
+The guest transport prepends a 32-byte big-endian `uint256` job ID, the
+32-byte input commitment, and the canonical input byte length as `u32`
+big-endian. The journal is raw, non-serde data:
+
+| Field | Encoding |
+| --- | --- |
+| Version tag | ASCII `RZMM_JOURNAL_V1` (15 bytes) |
+| Job ID | 32-byte big-endian `uint256` |
+| Input commitment | 32 bytes |
+| Result rows, result columns | `u32` big-endian |
+| Result elements | Row-major signed `i32`, two's-complement big-endian |
+
+The Ethereum journal digest remains SHA-256 of the exact raw journal bytes.
+The proof exporter validates the bound journal and the local EVM script checks
+the canonical input, input commitment, journal fields, journal SHA-256, and
+then submits the genuine selector-prefixed Groth16 seal to the official
+verifier. Run the updated integration with:
+
+```sh
+npm run verify:risc0
+```
+
+The job ID in this proof demonstration is the fixed value `7`; production job
+creation and marketplace submission are not wired to the proof exporter in
+this stage. The existing expensive Rust Groth16 test remains separate from the
+fast unit tests in `risc0/matrix-format` and `risc0/host`.

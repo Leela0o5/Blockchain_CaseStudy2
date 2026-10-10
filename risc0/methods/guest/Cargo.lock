@@ -512,11 +512,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "matrix-format"
+version = "0.1.0"
+
+[[package]]
 name = "matrix_multiply_guest"
 version = "0.1.0"
 dependencies = [
+ "matrix-format",
  "risc0-zkvm",
- "serde",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
+    "verify:risc0": "hardhat run scripts/verify-real-risc0-receipt.ts",
     "verify:risc0:real": "hardhat run scripts/verify-real-risc0-receipt.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

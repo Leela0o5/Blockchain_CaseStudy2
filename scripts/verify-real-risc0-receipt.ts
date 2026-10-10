@@ -5,6 +5,9 @@ import { RISC_ZERO_BN254_CONTROL_ID, RISC_ZERO_CONTROL_ROOT } from './risc0-veri
 
 interface EthereumProof {
   image_id: string;
+  job_id: string;
+  input_hex: string;
+  input_commitment: string;
   journal_hex: string;
   journal_sha256: string;
   seal_hex: string;
@@ -23,8 +26,35 @@ async function main() {
   );
   const proof = JSON.parse(proofJson) as EthereumProof;
   const journalBytes = ethers.getBytes(proof.journal_hex);
+  const inputBytes = ethers.getBytes(proof.input_hex);
   const sealBytes = ethers.getBytes(proof.seal_hex);
 
+  const u32be = (value: number) => {
+    const encoded = Buffer.alloc(4);
+    encoded.writeUInt32BE(value);
+    return encoded;
+  };
+  const i32be = (value: number) => {
+    const encoded = Buffer.alloc(4);
+    encoded.writeInt32BE(value);
+    return encoded;
+  };
+  const expectedInput = Buffer.concat([
+    Buffer.from('RZMM_INPUT_V1', 'ascii'),
+    u32be(2), u32be(3), ...[1, 2, 3, 4, 5, 6].map(i32be),
+    u32be(3), u32be(2), ...[7, 8, 9, 1, 2, 3].map(i32be),
+  ]);
+  expect(ethers.hexlify(inputBytes)).to.equal(ethers.hexlify(expectedInput));
+  expect(ethers.sha256(inputBytes)).to.equal(proof.input_commitment);
+  expect(proof.job_id).to.equal(ethers.toBeHex(7, 32));
+
+  const expectedJournal = Buffer.concat([
+    Buffer.from('RZMM_JOURNAL_V1', 'ascii'),
+    Buffer.from(proof.job_id.slice(2), 'hex'),
+    Buffer.from(proof.input_commitment.slice(2), 'hex'),
+    u32be(2), u32be(2), ...[31, 19, 85, 55].map(i32be),
+  ]);
+  expect(ethers.hexlify(journalBytes)).to.equal(ethers.hexlify(expectedJournal));
   expect(ethers.sha256(journalBytes)).to.equal(proof.journal_sha256);
 
   const Verifier = await ethers.getContractFactory('RiscZeroGroth16Verifier');
