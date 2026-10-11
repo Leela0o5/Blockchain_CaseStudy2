@@ -48,6 +48,8 @@ contract ComputeMarketplace {
 
     error ZeroReward();
     error InvalidImageId();
+    error InvalidApprovedImageId();
+    error UnsupportedImageId(bytes32 suppliedImageId, bytes32 approvedImageId);
     error InvalidVerifierAddress();
     error JobNotFound(uint256 jobId);
     error InvalidJobStatus(uint256 jobId, JobStatus currentStatus, JobStatus expectedStatus);
@@ -79,6 +81,9 @@ contract ComputeMarketplace {
 
     /// @notice Address of the RISC Zero verifier contract
     address public verifier;
+
+    /// @notice Approved image ID for the matrix-multiplication guest
+    bytes32 public immutable approvedImageId;
 
     /// @notice Auto-incrementing identifier for created jobs
     uint256 public nextJobId;
@@ -130,14 +135,17 @@ contract ComputeMarketplace {
     // Constructor
     // -------------------------------------------------------------------------
 
-    /// @notice Initializes marketplace contract with a deployed proof verifier
+    /// @notice Initializes marketplace contract with a verifier and approved guest image ID
     /// @param verifierAddress Initial address of the proof verifier
-    constructor(address verifierAddress) {
+    /// @param approvedImageId_ Approved RISC Zero image ID for the matrix-multiplication guest
+    constructor(address verifierAddress, bytes32 approvedImageId_) {
         if (verifierAddress == address(0) || verifierAddress.code.length == 0) {
             revert InvalidVerifierAddress();
         }
+        if (approvedImageId_ == bytes32(0)) revert InvalidApprovedImageId();
         owner = msg.sender;
         verifier = verifierAddress;
+        approvedImageId = approvedImageId_;
         nextJobId = 1;
         _locked = 1;
 
@@ -181,6 +189,9 @@ contract ComputeMarketplace {
     ) external payable returns (uint256 jobId) {
         if (msg.value == 0) revert ZeroReward();
         if (imageId == bytes32(0)) revert InvalidImageId();
+        if (imageId != approvedImageId) {
+            revert UnsupportedImageId(imageId, approvedImageId);
+        }
         _validateCanonicalInput(inputData);
 
         jobId = nextJobId;

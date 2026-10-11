@@ -79,7 +79,7 @@ async function main() {
 
   const [requester, worker] = await ethers.getSigners();
   const Marketplace = await ethers.getContractFactory('ComputeMarketplace');
-  const marketplace = await Marketplace.deploy(await verifier.getAddress());
+  const marketplace = await Marketplace.deploy(await verifier.getAddress(), proof.image_id);
   await marketplace.waitForDeployment();
 
   const marketplaceJobId = BigInt(proof.job_id);

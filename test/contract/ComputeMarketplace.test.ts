@@ -11,7 +11,8 @@ describe('ComputeMarketplace (mock verifier logic tests; not cryptographic proof
   let worker2: SignerWithAddress;
   let attacker: SignerWithAddress;
 
-  const SAMPLE_IMAGE_ID = ethers.keccak256(ethers.toUtf8Bytes('guest_program_fibonacci_v1'));
+  const SAMPLE_IMAGE_ID = ethers.keccak256(ethers.toUtf8Bytes('approved_matrix_multiply_guest'));
+  const OTHER_IMAGE_ID = ethers.keccak256(ethers.toUtf8Bytes('unapproved_guest'));
   const SAMPLE_INPUT = encodeMatrixInputs();
   const SAMPLE_RESULT = encodeJournal();
   const SAMPLE_PROOF = ethers.concat(['0xc101b42b', ethers.toUtf8Bytes('mock seal')]);
@@ -100,7 +101,7 @@ describe('ComputeMarketplace (mock verifier logic tests; not cryptographic proof
     await mockVerifier.waitForDeployment();
 
     const MarketplaceFactory = await ethers.getContractFactory('ComputeMarketplace');
-    marketplace = await MarketplaceFactory.deploy(await mockVerifier.getAddress());
+    marketplace = await MarketplaceFactory.deploy(await mockVerifier.getAddress(), SAMPLE_IMAGE_ID);
     await marketplace.waitForDeployment();
   });
 
@@ -120,20 +121,25 @@ describe('ComputeMarketplace (mock verifier logic tests; not cryptographic proof
       expect(await marketplace.verifier()).to.equal(await mockVerifier.getAddress());
     });
 
+    it('stores the approved image ID at deployment', async () => {
+      expect(await marketplace.approvedImageId()).to.equal(SAMPLE_IMAGE_ID);
+    });
+
     it('should initialize nextJobId to 1', async () => {
       expect(await marketplace.nextJobId()).to.equal(1n);
     });
 
     it('rejects a zero or non-contract verifier at deployment', async () => {
       const MarketplaceFactory = await ethers.getContractFactory('ComputeMarketplace');
-      await expect(MarketplaceFactory.deploy(ethers.ZeroAddress)).to.be.revertedWithCustomError(
-        MarketplaceFactory,
-        'InvalidVerifierAddress',
-      );
-      await expect(MarketplaceFactory.deploy(attacker.address)).to.be.revertedWithCustomError(
-        MarketplaceFactory,
-        'InvalidVerifierAddress',
-      );
+      await expect(
+        MarketplaceFactory.deploy(ethers.ZeroAddress, SAMPLE_IMAGE_ID),
+      ).to.be.revertedWithCustomError(MarketplaceFactory, 'InvalidVerifierAddress');
+      await expect(
+        MarketplaceFactory.deploy(attacker.address, SAMPLE_IMAGE_ID),
+      ).to.be.revertedWithCustomError(MarketplaceFactory, 'InvalidVerifierAddress');
+      await expect(
+        MarketplaceFactory.deploy(await mockVerifier.getAddress(), ethers.ZeroHash),
+      ).to.be.revertedWithCustomError(MarketplaceFactory, 'InvalidApprovedImageId');
     });
   });
 
@@ -209,6 +215,14 @@ describe('ComputeMarketplace (mock verifier logic tests; not cryptographic proof
       await expect(
         marketplace.connect(requester).createJob(ethers.ZeroHash, SAMPLE_INPUT, { value: ONE_ETH }),
       ).to.be.revertedWithCustomError(marketplace, 'InvalidImageId');
+    });
+
+    it('rejects a different nonzero image ID', async () => {
+      await expect(
+        marketplace.connect(requester).createJob(OTHER_IMAGE_ID, SAMPLE_INPUT, { value: ONE_ETH }),
+      )
+        .to.be.revertedWithCustomError(marketplace, 'UnsupportedImageId')
+        .withArgs(OTHER_IMAGE_ID, SAMPLE_IMAGE_ID);
     });
 
     it('rejects input data that is not the exact canonical matrix encoding', async () => {
@@ -472,6 +486,7 @@ describe('ComputeMarketplace (mock verifier logic tests; not cryptographic proof
         .withArgs(await mockVerifier.getAddress(), newVerifierAddress);
 
       expect(await marketplace.verifier()).to.equal(newVerifierAddress);
+      expect(await marketplace.approvedImageId()).to.equal(SAMPLE_IMAGE_ID);
     });
 
     it('rejects zero and non-contract verifier updates', async () => {

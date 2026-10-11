@@ -187,12 +187,17 @@ it directly with the pinned official verifier, then submits it through the
 marketplace and checks the completed job and released escrow.
 
 For a persistent local Hardhat node, deploy the official verifier first and
-explicitly pass its address into marketplace deployment:
+explicitly pass its address and the matrix guest image ID into marketplace
+deployment. `MATRIX_MULTIPLY_GUEST_ID` must be the nonzero `bytes32` image ID
+generated for the guest build you intend to accept; there is no production
+default. The marketplace stores this value as an immutable approval, rejects
+jobs for other image IDs, and changing the guest requires deploying a new
+marketplace.
 
 ```sh
 npx hardhat node
 npx hardhat run scripts/deploy-risc0-verifier.ts --network localhost
-VERIFIER_ADDRESS=0x... npx hardhat run scripts/deploy.ts --network localhost
+VERIFIER_ADDRESS=0x... MATRIX_MULTIPLY_GUEST_ID=0x... npx hardhat run scripts/deploy.ts --network localhost
 ```
 
 The local mock deployment must be explicitly requested and is development-only:
@@ -201,13 +206,13 @@ The local mock deployment must be explicitly requested and is development-only:
 DEPLOY_MOCK_VERIFIER=true npx hardhat run scripts/deploy.ts --network localhost
 ```
 
-`deploy.ts` otherwise requires a nonzero `VERIFIER_ADDRESS` with deployed
-contract code and rejects mock mode on public networks. For Sepolia, configure
-`SEPOLIA_RPC_URL` and `PRIVATE_KEY` in the environment, then explicitly opt in
-to deploying the official verifier. Use its printed address for the marketplace
-deployment:
+`deploy.ts` requires a nonzero `VERIFIER_ADDRESS` with deployed contract code
+and a nonzero `MATRIX_MULTIPLY_GUEST_ID`; it rejects mock mode on public
+networks. For Sepolia, configure `SEPOLIA_RPC_URL` and `PRIVATE_KEY` in the
+environment, then explicitly opt in to deploying the official verifier. Use
+its printed address and the matrix guest ID for marketplace deployment:
 
 ```sh
 DEPLOY_RISC0_VERIFIER=true npx hardhat run scripts/deploy-risc0-verifier.ts --network sepolia
-VERIFIER_ADDRESS=0x... npx hardhat run scripts/deploy.ts --network sepolia
+VERIFIER_ADDRESS=0x... MATRIX_MULTIPLY_GUEST_ID=0x... npx hardhat run scripts/deploy.ts --network sepolia
 ```

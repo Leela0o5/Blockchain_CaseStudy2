@@ -10,6 +10,17 @@ async function main() {
   console.log(`Deployer balance: ${ethers.formatEther(balance)} ETH`);
   console.log('----------------------------------------------------');
 
+  const approvedImageId = process.env.MATRIX_MULTIPLY_GUEST_ID;
+  if (
+    !approvedImageId ||
+    !ethers.isHexString(approvedImageId, 32) ||
+    approvedImageId.toLowerCase() === ethers.ZeroHash
+  ) {
+    throw new Error(
+      'MATRIX_MULTIPLY_GUEST_ID must be configured as a nonzero 32-byte hex guest image ID.',
+    );
+  }
+
   let verifierAddress = process.env.VERIFIER_ADDRESS;
   const deployDevelopmentMock = process.env.DEPLOY_MOCK_VERIFIER === 'true';
 
@@ -48,19 +59,20 @@ async function main() {
 
   console.log('Deploying ComputeMarketplace...');
   const MarketplaceFactory = await ethers.getContractFactory('ComputeMarketplace');
-  const marketplace = await MarketplaceFactory.deploy(configuredVerifierAddress);
+  const marketplace = await MarketplaceFactory.deploy(configuredVerifierAddress, approvedImageId);
   await marketplace.waitForDeployment();
   const marketplaceAddress = await marketplace.getAddress();
 
   console.log('----------------------------------------------------');
   console.log(`ComputeMarketplace deployed successfully at: ${marketplaceAddress}`);
   console.log(`Initial Verifier set to: ${configuredVerifierAddress}`);
+  console.log(`Approved matrix guest image ID: ${approvedImageId}`);
   console.log('----------------------------------------------------');
 
   if (network.name === 'sepolia') {
     console.log('To verify on Etherscan, run:');
     console.log(
-      `npx.cmd hardhat verify --network sepolia ${marketplaceAddress} "${verifierAddress}"`,
+      `npx.cmd hardhat verify --network sepolia ${marketplaceAddress} "${configuredVerifierAddress}" "${approvedImageId}"`,
     );
   }
 }
