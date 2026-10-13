@@ -12,12 +12,16 @@ import marketplaceAbi from '../contracts/ComputeMarketplace.json'
 export { encodeCanonicalMatrixInputs, parseIntegerMatrix } from './matrix-input'
 export type { IntegerMatrix } from './matrix-input'
 
+
+
 export interface InjectedEthereum extends Eip1193Provider {
-  on(_event: 'accountsChanged', _listener: (accounts: string[]) => void): void
-  on(_event: 'chainChanged', _listener: (chainId: string) => void): void
-  removeListener(_event: 'accountsChanged', _listener: (accounts: string[]) => void): void
-  removeListener(_event: 'chainChanged', _listener: (chainId: string) => void): void
+  on(_event: 'accountsChanged', _listener: (_accounts: string[]) => void): void
+  on(_event: 'chainChanged', _listener: (_chainId: string) => void): void
+  removeListener(_event: 'accountsChanged', _listener: (_accounts: string[]) => void): void
+  removeListener(_event: 'chainChanged', _listener: (_chainId: string) => void): void
 }
+
+
 
 export interface MarketplaceConfig {
   address: string | null

@@ -106,12 +106,39 @@ async function main() {
       value: ethers.parseEther('0.01'),
     })
   ).wait();
-  await (await marketplace.connect(worker).acceptJob(marketplaceJobId)).wait();
-  await (
-    await marketplace
-      .connect(worker)
-      .submitResultWithProof(marketplaceJobId, proof.journal_hex, proof.seal_hex)
-  ).wait();
+ 
+await (await marketplace.connect(worker).acceptJob(marketplaceJobId)).wait();
+
+// A corrupted seal must be rejected by the real cryptographic verifier.
+const marketplaceAddress = await marketplace.getAddress();
+const marketplaceBalanceBefore = await ethers.provider.getBalance(marketplaceAddress);
+
+const corruptedSeal = ethers.hexlify(
+  ethers.getBytes(proof.seal_hex).map((byte, index) =>
+    index === 10 ? byte ^ 1 : byte,
+  ),
+);
+
+await expect(
+  marketplace
+    .connect(worker)
+    .submitResultWithProof(marketplaceJobId, proof.journal_hex, corruptedSeal),
+).to.be.reverted;
+
+const jobAfterRejectedProof = await marketplace.getJob(marketplaceJobId);
+expect(jobAfterRejectedProof.status).to.equal(2n); // Accepted, not Completed
+expect(jobAfterRejectedProof.result).to.equal('0x');
+expect(await ethers.provider.getBalance(marketplaceAddress)).to.equal(
+  marketplaceBalanceBefore,
+);
+
+// The genuine seal must still complete the same job successfully.
+await (
+  await marketplace
+    .connect(worker)
+    .submitResultWithProof(marketplaceJobId, proof.journal_hex, proof.seal_hex)
+).wait();
+
 
   const completedJob = await marketplace.getJob(marketplaceJobId);
   expect(completedJob.status).to.equal(3n);

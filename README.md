@@ -117,6 +117,21 @@ digest. Do not set `RISC0_DEV_MODE=1` for this check. The Rust exporter requires
 a genuine `Groth16` receipt; the existing mock verifier and Stage 1 interface
 smoke test do not establish this result.
 
+### Invalid proof rejection and escrow safety
+
+The real-verifier integration script also tests rejection of a corrupted Groth16 seal through `ComputeMarketplace`. After the job is accepted, the script modifies a byte in the seal and attempts to submit it with the genuine journal.
+
+The test asserts that:
+
+- The corrupted proof is rejected by the official verifier.
+- The job remains in the `Accepted` state.
+- The job result remains empty.
+- The marketplace escrow balance remains unchanged.
+- Submitting the original genuine proof afterward successfully completes the job and releases the reward.
+
+The script also tests rejection of a modified journal digest directly against the official verifier. These checks complement the fast mock-verifier unit tests; they exercise the actual cryptographic verification path on a local Hardhat network.
+
+**Scope:** These are local integration tests. They do not demonstrate deployment or verification on Ethereum Sepolia.
 ## Matrix proof input and journal binding (Stage 3)
 
 The matrix guest receives a byte-framed request and independently recomputes
