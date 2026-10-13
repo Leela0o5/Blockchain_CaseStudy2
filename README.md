@@ -128,6 +128,7 @@ The test asserts that:
 - The job result remains empty.
 - The marketplace escrow balance remains unchanged.
 - Submitting the original genuine proof afterward successfully completes the job and releases the reward.
+- A genuine proof for job 7 cannot be replayed against job 8; the second job remains accepted, its result remains empty, and its escrow remains locked.
 
 The script also tests rejection of a modified journal digest directly against the official verifier. These checks complement the fast mock-verifier unit tests; they exercise the actual cryptographic verification path on a local Hardhat network.
 

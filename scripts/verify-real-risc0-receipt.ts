@@ -132,6 +132,39 @@ expect(await ethers.provider.getBalance(marketplaceAddress)).to.equal(
   marketplaceBalanceBefore,
 );
 
+
+  // A genuine proof for job 7 must not be replayable against job 8.
+  const replayJobId = marketplaceJobId + 1n;
+  const replayReward = ethers.parseEther('0.02');
+
+  await (
+    await marketplace.connect(requester).createJob(proof.image_id, inputBytes, {
+      value: replayReward,
+    })
+  ).wait();
+
+  expect(await marketplace.nextJobId()).to.equal(replayJobId + 1n);
+
+  await (await marketplace.connect(worker).acceptJob(replayJobId)).wait();
+
+  const replayEscrowBefore = await ethers.provider.getBalance(marketplaceAddress);
+
+  await expect(
+    marketplace
+      .connect(worker)
+      .submitResultWithProof(replayJobId, proof.journal_hex, proof.seal_hex),
+  ).to.be.reverted;
+
+  const replayedJob = await marketplace.getJob(replayJobId);
+  expect(replayedJob.status).to.equal(2n); // Still Accepted
+  expect(replayedJob.result).to.equal('0x');
+  expect(await ethers.provider.getBalance(marketplaceAddress)).to.equal(
+    replayEscrowBefore,
+  );
+
+  console.log('Cross-job proof replay was rejected; escrow remained locked.');
+
+
 // The genuine seal must still complete the same job successfully.
 await (
   await marketplace
@@ -143,7 +176,10 @@ await (
   const completedJob = await marketplace.getJob(marketplaceJobId);
   expect(completedJob.status).to.equal(3n);
   expect(completedJob.result).to.equal(proof.journal_hex);
-  expect(await ethers.provider.getBalance(await marketplace.getAddress())).to.equal(0n);
+  // Job 7 paid its worker; job 8's reward remains escrowed.
+expect(await ethers.provider.getBalance(await marketplace.getAddress())).to.equal(
+  replayReward,
+);
 
   console.log('Real Groth16 receipt verified directly and through ComputeMarketplace.');
   console.log(`Verifier address: ${await verifier.getAddress()}`);
