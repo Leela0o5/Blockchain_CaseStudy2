@@ -260,3 +260,20 @@ its printed address and the matrix guest ID for marketplace deployment:
 DEPLOY_RISC0_VERIFIER=true npx hardhat run scripts/deploy-risc0-verifier.ts --network sepolia
 VERIFIER_ADDRESS=0x... MATRIX_MULTIPLY_GUEST_ID=0x... npx hardhat run scripts/deploy.ts --network sepolia
 ```
+
+## Technology Stack
+
+### Smart Contract Tech Stack
+
+- **Blockchain:** Ethereum
+- **Network:** Ethereum Sepolia Testnet
+- **Smart Contract Language:** Solidity
+- **Development Framework:** Hardhat
+- **Contract Testing:** Hardhat + TypeScript
+- **Contract Deployment:** Hardhat deployment scripts
+- **Wallet / Transactions:** MetaMask
+- **Proof Verification:** RISC Zero Ethereum verifier/verification mechanism
+- **Code Formatting:** Prettier
+- **Solidity Linting:** Solhint
+- **TypeScript/JavaScript Linting:** ESLint
+- **Version Control:** Git + GitHub
