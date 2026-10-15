@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 
-describe('ComputeMarketplace', () => {
+describe('ComputeMarketplace (mock verifier logic tests; not cryptographic proof verification)', () => {
   let marketplace: any;
   let mockVerifier: any;
   let owner: SignerWithAddress;
@@ -11,10 +11,11 @@ describe('ComputeMarketplace', () => {
   let worker2: SignerWithAddress;
   let attacker: SignerWithAddress;
 
-  const SAMPLE_IMAGE_ID = ethers.keccak256(ethers.toUtf8Bytes('guest_program_fibonacci_v1'));
-  const SAMPLE_INPUT = ethers.toUtf8Bytes('n=40');
-  const SAMPLE_RESULT = ethers.toUtf8Bytes('fib(40)=102334155');
-  const SAMPLE_PROOF = ethers.toUtf8Bytes('mock_zk_proof_seal_bytes_12345');
+  const SAMPLE_IMAGE_ID = ethers.keccak256(ethers.toUtf8Bytes('approved_matrix_multiply_guest'));
+  const OTHER_IMAGE_ID = ethers.keccak256(ethers.toUtf8Bytes('unapproved_guest'));
+  const SAMPLE_INPUT = encodeMatrixInputs();
+  const SAMPLE_RESULT = encodeJournal();
+  const SAMPLE_PROOF = ethers.concat(['0xc101b42b', ethers.toUtf8Bytes('mock seal')]);
   const ONE_ETH = ethers.parseEther('1.0');
 
   const JobStatus = {
@@ -25,6 +26,73 @@ describe('ComputeMarketplace', () => {
     Cancelled: 4n,
   } as const;
 
+  function encodeU32(value: number): Buffer {
+    const encoded = Buffer.alloc(4);
+    encoded.writeUInt32BE(value);
+    return encoded;
+  }
+
+  function encodeI32(value: number): Buffer {
+    const encoded = Buffer.alloc(4);
+    encoded.writeInt32BE(value);
+    return encoded;
+  }
+
+  function encodeMatrixInputs(): Buffer {
+    return Buffer.concat([
+      Buffer.from('RZMM_INPUT_V1', 'ascii'),
+      encodeU32(2),
+      encodeU32(2),
+      ...[1, 2, 3, 4].map(encodeI32),
+      encodeU32(2),
+      encodeU32(2),
+      ...[5, 6, 7, 8].map(encodeI32),
+    ]);
+  }
+
+  function encodeJournal(
+    jobId = 1n,
+    inputCommitment = ethers.sha256(encodeMatrixInputs()),
+    rows = 2,
+    cols = 2,
+    values = [19, 22, 43, 50],
+    tag = Buffer.from('RZMM_JOURNAL_V1', 'ascii'),
+  ): Buffer {
+    return Buffer.concat([
+      tag,
+      ethers.getBytes(ethers.toBeHex(jobId, 32)),
+      ethers.getBytes(inputCommitment),
+      encodeU32(rows),
+      encodeU32(cols),
+      ...values.map(encodeI32),
+    ]);
+  }
+
+  async function prepareExpectedVerifierCall(journal = SAMPLE_RESULT): Promise<void> {
+    await mockVerifier.setExpectedCall(
+      SAMPLE_IMAGE_ID,
+      ethers.sha256(journal),
+      ethers.keccak256(SAMPLE_PROOF),
+    );
+  }
+
+  async function expectFailedSubmission(errorName: string, journal = SAMPLE_RESULT): Promise<void> {
+    const marketplaceAddress = await marketplace.getAddress();
+    await expect(
+      marketplace.connect(worker).submitResultWithProof(1n, journal, SAMPLE_PROOF),
+    ).to.be.revertedWithCustomError(
+      errorName === 'MockVerificationFailed' ? mockVerifier : marketplace,
+      errorName,
+    );
+
+    const job = await marketplace.getJob(1n);
+    expect(job.status).to.equal(JobStatus.Accepted);
+    expect(job.result).to.equal('0x');
+    expect(job.proof).to.equal('0x');
+    expect(job.completedAt).to.equal(0n);
+    expect(await ethers.provider.getBalance(marketplaceAddress)).to.equal(ONE_ETH);
+  }
+
   beforeEach(async () => {
     [owner, requester, worker, worker2, attacker] = await ethers.getSigners();
 
@@ -33,11 +101,18 @@ describe('ComputeMarketplace', () => {
     await mockVerifier.waitForDeployment();
 
     const MarketplaceFactory = await ethers.getContractFactory('ComputeMarketplace');
-    marketplace = await MarketplaceFactory.deploy(await mockVerifier.getAddress());
+    marketplace = await MarketplaceFactory.deploy(await mockVerifier.getAddress(), SAMPLE_IMAGE_ID);
     await marketplace.waitForDeployment();
   });
 
   describe('Deployment & Initial State', () => {
+    it('uses the official verifier ABI shape with no return value', async () => {
+      const verify = mockVerifier.interface.getFunction('verify(bytes,bytes32,bytes32)');
+      expect(verify).not.to.equal(null);
+      expect(verify?.outputs.length).to.equal(0);
+      expect(verify?.stateMutability).to.equal('view');
+    });
+
     it('should set the deployer as owner', async () => {
       expect(await marketplace.owner()).to.equal(owner.address);
     });
@@ -46,8 +121,25 @@ describe('ComputeMarketplace', () => {
       expect(await marketplace.verifier()).to.equal(await mockVerifier.getAddress());
     });
 
+    it('stores the approved image ID at deployment', async () => {
+      expect(await marketplace.approvedImageId()).to.equal(SAMPLE_IMAGE_ID);
+    });
+
     it('should initialize nextJobId to 1', async () => {
       expect(await marketplace.nextJobId()).to.equal(1n);
+    });
+
+    it('rejects a zero or non-contract verifier at deployment', async () => {
+      const MarketplaceFactory = await ethers.getContractFactory('ComputeMarketplace');
+      await expect(
+        MarketplaceFactory.deploy(ethers.ZeroAddress, SAMPLE_IMAGE_ID),
+      ).to.be.revertedWithCustomError(MarketplaceFactory, 'InvalidVerifierAddress');
+      await expect(
+        MarketplaceFactory.deploy(attacker.address, SAMPLE_IMAGE_ID),
+      ).to.be.revertedWithCustomError(MarketplaceFactory, 'InvalidVerifierAddress');
+      await expect(
+        MarketplaceFactory.deploy(await mockVerifier.getAddress(), ethers.ZeroHash),
+      ).to.be.revertedWithCustomError(MarketplaceFactory, 'InvalidApprovedImageId');
     });
   });
 
@@ -124,6 +216,36 @@ describe('ComputeMarketplace', () => {
         marketplace.connect(requester).createJob(ethers.ZeroHash, SAMPLE_INPUT, { value: ONE_ETH }),
       ).to.be.revertedWithCustomError(marketplace, 'InvalidImageId');
     });
+
+    it('rejects a different nonzero image ID', async () => {
+      await expect(
+        marketplace.connect(requester).createJob(OTHER_IMAGE_ID, SAMPLE_INPUT, { value: ONE_ETH }),
+      )
+        .to.be.revertedWithCustomError(marketplace, 'UnsupportedImageId')
+        .withArgs(OTHER_IMAGE_ID, SAMPLE_IMAGE_ID);
+    });
+
+    it('rejects input data that is not the exact canonical matrix encoding', async () => {
+      const wrongTag = Buffer.from(SAMPLE_INPUT);
+      wrongTag[0] ^= 0xff;
+      await expect(
+        marketplace.connect(requester).createJob(SAMPLE_IMAGE_ID, wrongTag, { value: ONE_ETH }),
+      ).to.be.revertedWithCustomError(marketplace, 'InvalidInputTag');
+
+      await expect(
+        marketplace
+          .connect(requester)
+          .createJob(SAMPLE_IMAGE_ID, Buffer.concat([SAMPLE_INPUT, Buffer.from([0])]), {
+            value: ONE_ETH,
+          }),
+      ).to.be.revertedWithCustomError(marketplace, 'InvalidInputLength');
+
+      const zeroRows = Buffer.from(SAMPLE_INPUT);
+      zeroRows.writeUInt32BE(0, 13);
+      await expect(
+        marketplace.connect(requester).createJob(SAMPLE_IMAGE_ID, zeroRows, { value: ONE_ETH }),
+      ).to.be.revertedWithCustomError(marketplace, 'InvalidInputDimensions');
+    });
   });
 
   describe('Job Acceptance', () => {
@@ -183,7 +305,8 @@ describe('ComputeMarketplace', () => {
       await marketplace.connect(worker).acceptJob(1n);
     });
 
-    it('should verify proof and release escrow payment to worker on valid proof', async () => {
+    it('accepts a canonical journal when the mock verifier accepts and releases escrow', async () => {
+      await prepareExpectedVerifierCall();
       const initialWorkerBalance = await ethers.provider.getBalance(worker.address);
 
       const tx = await marketplace
@@ -207,6 +330,14 @@ describe('ComputeMarketplace', () => {
       expect(job.completedAt).to.be.gt(0n);
     });
 
+    it('passes the stored image ID and exact raw-journal SHA-256 to the verifier', async () => {
+      await prepareExpectedVerifierCall();
+      await marketplace.connect(worker).submitResultWithProof(1n, SAMPLE_RESULT, SAMPLE_PROOF);
+      const job = await marketplace.getJob(1n);
+      expect(job.imageId).to.equal(SAMPLE_IMAGE_ID);
+      expect(job.result).to.equal(ethers.hexlify(SAMPLE_RESULT));
+    });
+
     it('should revert if non-assigned worker tries to submit result', async () => {
       await marketplace.connect(worker2).registerWorker();
       await expect(
@@ -214,33 +345,76 @@ describe('ComputeMarketplace', () => {
       )
         .to.be.revertedWithCustomError(marketplace, 'OnlyAssignedWorker')
         .withArgs(1n, worker2.address, worker.address);
-    });
-
-    it('should revert if verifier rejects invalid proof seal', async () => {
-      // Empty proof causes mock verifier to return false
-      await expect(marketplace.connect(worker).submitResultWithProof(1n, SAMPLE_RESULT, '0x'))
-        .to.be.revertedWithCustomError(marketplace, 'ProofVerificationFailed')
-        .withArgs(1n);
-
-      // Verify job status remains Accepted and escrow stays locked
       const job = await marketplace.getJob(1n);
       expect(job.status).to.equal(JobStatus.Accepted);
+      expect(job.result).to.equal('0x');
+      expect(await ethers.provider.getBalance(await marketplace.getAddress())).to.equal(ONE_ETH);
     });
 
-    it('should revert if verifier forceFail is enabled', async () => {
+    it('rejects a journal containing the wrong job ID without releasing escrow', async () => {
+      await expectFailedSubmission('JournalJobIdMismatch', encodeJournal(2n));
+    });
+
+    it('rejects a journal containing the wrong input commitment without releasing escrow', async () => {
+      await expectFailedSubmission(
+        'JournalInputCommitmentMismatch',
+        encodeJournal(1n, ethers.ZeroHash),
+      );
+    });
+
+    it('rejects a wrong journal tag without releasing escrow', async () => {
+      await expectFailedSubmission(
+        'InvalidJournalTag',
+        encodeJournal(1n, ethers.sha256(SAMPLE_INPUT), 2, 2, [19, 22, 43, 50], Buffer.alloc(15)),
+      );
+    });
+
+    it('rejects a truncated journal without releasing escrow', async () => {
+      await expectFailedSubmission('InvalidJournalLength', SAMPLE_RESULT.subarray(0, 86));
+      const truncatedJournal = SAMPLE_RESULT.subarray(0, SAMPLE_RESULT.length - 1);
+      await expectFailedSubmission('InvalidJournalLength', truncatedJournal);
+    });
+
+    it('rejects zero result dimensions without releasing escrow', async () => {
+      const invalidDimensions = Buffer.from(SAMPLE_RESULT);
+      invalidDimensions.writeUInt32BE(0, 79);
+      await expectFailedSubmission('InvalidJournalDimensions', invalidDimensions);
+    });
+
+    it('rejects result dimensions inconsistent with the canonical input', async () => {
+      await expectFailedSubmission(
+        'JournalResultDimensionsMismatch',
+        encodeJournal(1n, ethers.sha256(SAMPLE_INPUT), 1, 4, [1, 2, 3, 4]),
+      );
+    });
+
+    it('rejects an incorrect element count or trailing journal bytes', async () => {
+      await expectFailedSubmission(
+        'InvalidJournalLength',
+        SAMPLE_RESULT.subarray(0, SAMPLE_RESULT.length - 4),
+      );
+      await expectFailedSubmission(
+        'InvalidJournalLength',
+        Buffer.concat([SAMPLE_RESULT, Buffer.from([0])]),
+      );
+    });
+
+    it('rejects when the verifier expects an image ID other than the stored job image ID', async () => {
+      await mockVerifier.setExpectedCall(
+        ethers.ZeroHash,
+        ethers.sha256(SAMPLE_RESULT),
+        ethers.keccak256(SAMPLE_PROOF),
+      );
+      await expectFailedSubmission('MockVerificationFailed');
+    });
+
+    it('should revert if verifier rejects the proof and preserve escrow/job state', async () => {
       await mockVerifier.setForceFail(true);
-
-      await expect(
-        marketplace.connect(worker).submitResultWithProof(1n, SAMPLE_RESULT, SAMPLE_PROOF),
-      )
-        .to.be.revertedWithCustomError(marketplace, 'ProofVerificationFailed')
-        .withArgs(1n);
-
-      const job = await marketplace.getJob(1n);
-      expect(job.status).to.equal(JobStatus.Accepted);
+      await expectFailedSubmission('MockVerificationFailed');
     });
 
     it('should prevent duplicate submissions / double payment release', async () => {
+      await prepareExpectedVerifierCall();
       await marketplace.connect(worker).submitResultWithProof(1n, SAMPLE_RESULT, SAMPLE_PROOF);
 
       await expect(
@@ -303,12 +477,25 @@ describe('ComputeMarketplace', () => {
 
   describe('Administration & Owner Controls', () => {
     it('should allow owner to update verifier address', async () => {
-      const newVerifierAddress = attacker.address;
+      const NewVerifierFactory = await ethers.getContractFactory('MockRiscZeroVerifier');
+      const newVerifier = await NewVerifierFactory.deploy();
+      await newVerifier.waitForDeployment();
+      const newVerifierAddress = await newVerifier.getAddress();
       await expect(marketplace.connect(owner).setVerifier(newVerifierAddress))
         .to.emit(marketplace, 'VerifierUpdated')
         .withArgs(await mockVerifier.getAddress(), newVerifierAddress);
 
       expect(await marketplace.verifier()).to.equal(newVerifierAddress);
+      expect(await marketplace.approvedImageId()).to.equal(SAMPLE_IMAGE_ID);
+    });
+
+    it('rejects zero and non-contract verifier updates', async () => {
+      await expect(
+        marketplace.connect(owner).setVerifier(ethers.ZeroAddress),
+      ).to.be.revertedWithCustomError(marketplace, 'InvalidVerifierAddress');
+      await expect(
+        marketplace.connect(owner).setVerifier(attacker.address),
+      ).to.be.revertedWithCustomError(marketplace, 'InvalidVerifierAddress');
     });
 
     it('should revert if non-owner attempts to update verifier', async () => {
@@ -362,9 +549,9 @@ describe('ComputeMarketplace', () => {
       await marketplace.connect(worker).acceptJob(1n);
       await marketplace.connect(worker2).acceptJob(2n);
 
-      // Both workers submit valid proofs
+      // Both workers submit journals accepted by the mock logic verifier.
       await marketplace.connect(worker).submitResultWithProof(1n, SAMPLE_RESULT, SAMPLE_PROOF);
-      await marketplace.connect(worker2).submitResultWithProof(2n, SAMPLE_RESULT, SAMPLE_PROOF);
+      await marketplace.connect(worker2).submitResultWithProof(2n, encodeJournal(2n), SAMPLE_PROOF);
 
       const job1 = await marketplace.getJob(1n);
       const job2 = await marketplace.getJob(2n);
@@ -373,6 +560,8 @@ describe('ComputeMarketplace', () => {
       expect(job2.status).to.equal(JobStatus.Completed);
       expect(job1.worker).to.equal(worker.address);
       expect(job2.worker).to.equal(worker2.address);
+      expect(job1.result).to.equal(ethers.hexlify(SAMPLE_RESULT));
+      expect(job2.result).to.equal(ethers.hexlify(encodeJournal(2n)));
     });
   });
 });

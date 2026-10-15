@@ -1,5 +1,17 @@
 import { ethers, network } from 'hardhat';
 
+function encodeU32(value: number): Buffer {
+  const encoded = Buffer.alloc(4);
+  encoded.writeUInt32BE(value);
+  return encoded;
+}
+
+function encodeI32(value: number): Buffer {
+  const encoded = Buffer.alloc(4);
+  encoded.writeInt32BE(value);
+  return encoded;
+}
+
 async function main() {
   console.log(`Testing complete transaction flow on network: ${network.name}`);
   const [signer] = await ethers.getSigners();
@@ -28,8 +40,18 @@ async function main() {
 
   // 2. Create Job with 0.0005 ETH Escrow
   console.log('\n[2/4] Creating a compute job with 0.0005 ETH escrow...');
-  const sampleImageId = ethers.keccak256(ethers.toUtf8Bytes('guest_fibonacci_workload'));
-  const sampleInput = ethers.toUtf8Bytes('n=10');
+  const sampleImageId = await marketplace.approvedImageId();
+  const sampleInput = ethers.hexlify(
+    Buffer.concat([
+      Buffer.from('RZMM_INPUT_V1', 'ascii'),
+      encodeU32(1),
+      encodeU32(1),
+      encodeI32(6),
+      encodeU32(1),
+      encodeU32(1),
+      encodeI32(7),
+    ]),
+  );
   const reward = ethers.parseEther('0.0005');
 
   const createTx = await marketplace.createJob(sampleImageId, sampleInput, { value: reward });

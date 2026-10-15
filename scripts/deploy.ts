@@ -10,34 +10,69 @@ async function main() {
   console.log(`Deployer balance: ${ethers.formatEther(balance)} ETH`);
   console.log('----------------------------------------------------');
 
-  let verifierAddress = process.env.VERIFIER_ADDRESS;
+  const approvedImageId = process.env.MATRIX_MULTIPLY_GUEST_ID;
+  if (
+    !approvedImageId ||
+    !ethers.isHexString(approvedImageId, 32) ||
+    approvedImageId.toLowerCase() === ethers.ZeroHash
+  ) {
+    throw new Error(
+      'MATRIX_MULTIPLY_GUEST_ID must be configured as a nonzero 32-byte hex guest image ID.',
+    );
+  }
 
-  if (!verifierAddress) {
-    console.log('No VERIFIER_ADDRESS provided. Deploying MockRiscZeroVerifier for testing...');
+  let verifierAddress = process.env.VERIFIER_ADDRESS;
+  const deployDevelopmentMock = process.env.DEPLOY_MOCK_VERIFIER === 'true';
+
+  if (verifierAddress && deployDevelopmentMock) {
+    throw new Error('Set VERIFIER_ADDRESS or DEPLOY_MOCK_VERIFIER=true, not both.');
+  }
+
+  if (!verifierAddress && deployDevelopmentMock) {
+    if (network.name !== 'hardhat' && network.name !== 'localhost') {
+      throw new Error('Mock verifier deployment is restricted to local development networks.');
+    }
+    console.warn('WARNING: deploying a development-only mock verifier; proofs are not verified.');
     const MockVerifierFactory = await ethers.getContractFactory('MockRiscZeroVerifier');
     const mockVerifier = await MockVerifierFactory.deploy();
     await mockVerifier.waitForDeployment();
     verifierAddress = await mockVerifier.getAddress();
     console.log(`MockRiscZeroVerifier deployed at: ${verifierAddress}`);
-  } else {
-    console.log(`Using existing Verifier at: ${verifierAddress}`);
+  } else if (!verifierAddress) {
+    throw new Error(
+      'VERIFIER_ADDRESS is required. For local logic development only, set DEPLOY_MOCK_VERIFIER=true.',
+    );
   }
+
+  const configuredVerifierAddress = verifierAddress;
+  if (
+    !configuredVerifierAddress ||
+    !ethers.isAddress(configuredVerifierAddress) ||
+    configuredVerifierAddress === ethers.ZeroAddress
+  ) {
+    throw new Error(`Invalid verifier address: ${configuredVerifierAddress}`);
+  }
+  if ((await ethers.provider.getCode(configuredVerifierAddress)) === '0x') {
+    throw new Error(`No verifier contract code found at ${configuredVerifierAddress}`);
+  }
+  console.log(`Using verifier at: ${configuredVerifierAddress}`);
 
   console.log('Deploying ComputeMarketplace...');
   const MarketplaceFactory = await ethers.getContractFactory('ComputeMarketplace');
-  const marketplace = await MarketplaceFactory.deploy(verifierAddress);
+  const marketplace = await MarketplaceFactory.deploy(configuredVerifierAddress, approvedImageId);
   await marketplace.waitForDeployment();
   const marketplaceAddress = await marketplace.getAddress();
 
   console.log('----------------------------------------------------');
   console.log(`ComputeMarketplace deployed successfully at: ${marketplaceAddress}`);
-  console.log(`Initial Verifier set to: ${verifierAddress}`);
+  console.log(`Initial Verifier set to: ${configuredVerifierAddress}`);
+  console.log(`Approved matrix guest image ID: ${approvedImageId}`);
   console.log('----------------------------------------------------');
 
   if (network.name === 'sepolia') {
     console.log('To verify on Etherscan, run:');
     console.log(
-      `npx.cmd hardhat verify --network sepolia ${marketplaceAddress} "${verifierAddress}"`,
+      `npx.cmd hardhat verify --network sepolia ${marketplaceAddress} "${configuredVerifierAddress}" "${approvedImageId}"`,
     );
   }
 }
