@@ -1,10 +1,16 @@
 # Architecture
 
-The project has two independently developed technical areas:
+The Decentralized Compute Marketplace consists of two decoupled subsystems:
 
-1. The blockchain side owns Solidity contracts, deployment scripts, and contract tests.
-2. The RISC Zero side owns deterministic guest computation, the host program, proof generation, receipt handling, and RISC Zero tests.
+1. **Blockchain Layer (`contracts/`, `scripts/`, `test/contract/`)**:
+   - `ComputeMarketplace.sol`: Coordinates jobs, manages escrow, enforces state transitions, and releases payments.
+   - `IRiscZeroVerifier.sol`: Clean interface boundary for verifying cryptographic execution proofs.
+   - `MockRiscZeroVerifier.sol`: Test verifier for staging and local development.
+   - Automated test suite ensuring deterministic escrow, safety invariants, and Tiger-style assertions.
 
-The contract boundary should receive only the data needed to coordinate a job and verify a computation result. Computation and proving details remain off-chain. Shared assumptions and any interface changes belong in this documentation directory.
+2. **Off-Chain RISC Zero Layer (`risc0/`, `test/risc0/`)**:
+   - Deterministic guest program execution.
+   - Host program for job fetching, workload execution, receipt generation, and submission.
+   - Proving and receipt serialization.
 
-No implementation is defined in this document yet.
+The interface between the two systems is defined by the `IRiscZeroVerifier` boundary. The marketplace contract receives only the minimum required metadata (`imageId`, `result`, `proof`) without needing internal knowledge of off-chain execution mechanisms.

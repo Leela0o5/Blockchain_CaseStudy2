@@ -16,3 +16,12 @@ target/
 npm-debug.log*
 
 .vscode/settings.json
+
+# Generated local proof artifacts
+job-*-input.bin
+job-*-proof.json
+
+# Frontend generated files and local environment
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
