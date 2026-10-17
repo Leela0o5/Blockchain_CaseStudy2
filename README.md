@@ -1,6 +1,8 @@
+>**Report:** [docs/BC_Report.pdf](docs/Case_Study_Report.pdf)
+
 # Problem Statement
 
-Decentralized cloud computing platforms often depend on trusted intermediaries to coordinate jobs, verify execution, and manage payments. This creates central points of failure, increases costs, and requires requesters to trust workers before results can be verified.
+Centralized cloud computing platforms often depend on trusted intermediaries to coordinate jobs, verify execution, and manage payments. This creates central points of failure, increases costs, and requires requesters to trust workers before results can be verified.
 This project proposes a **decentralized compute marketplace** on Ethereum Sepolia in which requesters can post computational jobs, workers can register and accept those jobs, and off-chain computations can be verified using **RISC Zero** before payment is released. The smart contract serves as the coordination and escrow layer, storing job details, managing worker assignment, verifying proof outcomes, and automatically releasing funds only when the computation is proven correct.
 
 The prototype is intended to demonstrate a trust-minimized workflow for exchanging computing resources without relying on a centralized platform or direct trust between requesters and workers.
