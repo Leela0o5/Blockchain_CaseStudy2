@@ -1,4 +1,4 @@
->**Report:** [docs/BC_Report.pdf](docs/Case_Study_Report.pdf)
+>**Report:** [docs/BC_Report.pdf](docs/BC_report.pdf)
 
 # Problem Statement
 
